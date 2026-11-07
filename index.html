@@ -63,6 +63,9 @@ code{background:rgba(0,0,0,.06);padding:0 4px;border-radius:4px}
 .item.active{border-color:var(--accent);box-shadow:0 0 0 3px rgba(180,70,43,.15)}
 .item-top{display:flex;gap:8px;align-items:center}
 .item-top .num{font-size:.8rem;color:var(--muted);min-width:1.6em;text-align:right}
+.item-top .f-sel{width:20px;height:20px;flex:0 0 auto;margin:0;cursor:pointer}
+.item.sel{background:#fbefe9}
+.sel-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fdfcf9;position:sticky;top:0;z-index:5}
 .f-char{width:76px!important;flex:0 0 76px;font-size:1.5rem;text-align:center;padding:4px}
 .item-top .f-meaning{flex:1}
 .item .btns{margin-top:8px}
@@ -344,6 +347,11 @@ body.g-mode{background:#111;overscroll-behavior:none}
 
   <section class="card">
     <h2>4. 한자 목록 (<span id="b-count">0</span>개)</h2>
+    <div class="sel-bar" id="b-sel-bar" hidden>
+      <label class="chk" style="margin:0"><input id="b-sel-all" type="checkbox"> 전체 선택</label>
+      <span class="note" id="b-sel-count" style="margin:0">선택한 한자 없음</span>
+      <button id="b-sel-del" class="del" disabled>선택한 한자 빼기</button>
+    </div>
     <div id="b-items"></div>
     <div class="b-actions"><button id="b-add">+ 빈 칸 추가</button></div>
   </section>
@@ -1129,19 +1137,43 @@ function initBuilder(importData){
     if (!el) return;
     const s = itemStatus(it); el.className = 'item-status ' + s.cls; el.textContent = s.text;
   }
+  /* 4. 한자 목록: 여러 개 골라서 한꺼번에 빼기 */
+  const SEL = new Set();
+  function updateSelUI(){
+    for (const id of Array.from(SEL)) if (!find(id)) SEL.delete(id);
+    const n = SEL.size, total = D.items.length;
+    $('#b-sel-bar').hidden = !total;
+    $('#b-sel-count').textContent = n ? n + '개 선택함' : '선택한 한자 없음';
+    $('#b-sel-del').disabled = !n;
+    $('#b-sel-del').textContent = n === total && n ? '전체 ' + n + '개 빼기' : '선택한 한자 빼기' + (n ? ' (' + n + ')' : '');
+    const all = $('#b-sel-all'); all.checked = !!total && n === total; all.indeterminate = n > 0 && n < total;
+  }
+  $('#b-sel-all').addEventListener('change', e => {
+    SEL.clear(); if (e.target.checked) D.items.forEach(it => SEL.add(it.id));
+    document.querySelectorAll('#b-items .item').forEach(el => { const on = SEL.has(el.dataset.id); el.classList.toggle('sel', on); const c = el.querySelector('.f-sel'); if (c) c.checked = on; });
+    updateSelUI();
+  });
+  $('#b-sel-del').addEventListener('click', () => {
+    const pick = D.items.filter(it => SEL.has(it.id)); if (!pick.length) return;
+    const names = pick.slice(0, 12).map(it => it.char || '(빈 칸)').join(' ') + (pick.length > 12 ? ' …' : '');
+    if (!confirm('선택한 한자 ' + pick.length + '개를 목록에서 뺄까요? 정해 둔 자리·힌트도 함께 지워집니다.\n' + names)) return;
+    D.items = D.items.filter(it => !SEL.has(it.id)); SEL.clear();
+    renderItems(); renderPick(); save();
+    toast(pick.length + '개를 뺐어요.');
+  });
   function renderItems(){
     const box = $('#b-items'); box.innerHTML = '';
     if (!D.items.length) box.innerHTML = '<p class="note">아직 한자가 없습니다. 위 ‘2. 한자 고르기’에서 넣으세요.</p>';
     D.items.forEach((it, i) => box.appendChild(itemEl(it, i)));
     $('#b-count').textContent = D.items.length;
     $('#b-pick-count').textContent = D.items.length;
-    syncAllMarkers(); drawSpot(); updateCheck(); renderGameSel();
+    syncAllMarkers(); drawSpot(); updateCheck(); renderGameSel(); updateSelUI();
   }
   function itemEl(it, i){
     const el = document.createElement('div');
     el.className = 'item'; el.dataset.id = it.id;
     el.innerHTML =
-      '<div class="item-top"><span class="num">' + (i+1) + '</span>' +
+      '<div class="item-top"><input type="checkbox" class="f-sel" aria-label="선택"><span class="num">' + (i+1) + '</span>' +
       '<input class="f-char han" maxlength="4" placeholder="學" aria-label="한자">' +
       '<input class="f-meaning" maxlength="30" placeholder="훈음 (예: 배울 학)" aria-label="훈음">' +
       '<button class="del" title="삭제">삭제</button></div>' +
@@ -1159,6 +1191,8 @@ function initBuilder(importData){
       '<label style="grid-column:1/-1">퀴즈 오답 보기 최대 3개, 쉼표로 구분 (비우면 다른 한자의 훈음으로 자동)<input class="f-wrong" placeholder="예: 가르칠 교, 글 서, 벗 우"></label>' +
       '</div></details><div class="item-status"></div>';
     const q = s => el.querySelector(s);
+    q('.f-sel').checked = SEL.has(it.id); el.classList.toggle('sel', SEL.has(it.id));
+    q('.f-sel').addEventListener('change', e => { if (e.target.checked) SEL.add(it.id); else SEL.delete(it.id); el.classList.toggle('sel', e.target.checked); updateSelUI(); });
     q('.f-char').value = it.char; q('.f-meaning').value = it.meaning; q('.f-loc').value = locText(it);
     q('.f-radius').value = it.radius; q('.f-radical').value = it.radical; q('.f-hint').value = it.hint; q('.f-wrong').value = it.wrong.join(', ');
     q('.f-bearing').value = it.bearing == null ? '' : Math.round(it.bearing); q('.f-elev').value = String(it.elev);
